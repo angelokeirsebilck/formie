@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Add Communication Preferences (subscription types) support to the HubSpot CRM integration, to subscribe contacts with a legal basis.
+
 ### Fixed
 - Fix Zoho picklist mappings sending option metadata IDs instead of their API values. ([#2959](https://github.com/verbb/formie/issues/2959))
 - Fix Brevo double opt-in settings allowing the required template ID and redirection URL to be saved empty.

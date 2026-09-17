@@ -9,6 +9,9 @@
 {% set mapToCompany = form.settings.integrations[handle].mapToCompany ?? '' %}
 {% set mapToTicket = form.settings.integrations[handle].mapToTicket ?? '' %}
 {% set mapToForm = form.settings.integrations[handle].mapToForm ?? '' %}
+{% set mapToCommunications = form.settings.integrations[handle].mapToCommunications ?? '' %}
+{% set communicationsLegalBasis = (form.settings.integrations[handle].communicationsLegalBasis ?? null) ?: 'CONSENT_WITH_NOTICE' %}
+{% set communicationsLegalBasisExplanation = form.settings.integrations[handle].communicationsLegalBasisExplanation ?? '' %}
 {% set formId = form.settings.integrations[handle].formId ?? '' %}
 
 <field-select
@@ -135,6 +138,63 @@
 
             <ul v-if="!isEmpty(get(form, 'settings.integrations.{{ handle }}.errors.ticketFieldMapping'))" class="errors" v-cloak>
                 <li v-for="(error, index) in get(form, 'settings.integrations.{{ handle }}.errors.ticketFieldMapping')" :key="index">
+                    ${ error }
+                </li>
+            </ul>
+        </div>
+
+        {{ forms.lightswitchField({
+            label: 'Map to Communications' | t('formie'),
+            instructions: 'Whether to subscribe contacts to {name} subscription types, using the Communication Preferences API.' | t('formie', { name: displayName }),
+            id: 'mapToCommunications',
+            name: 'mapToCommunications',
+            on: mapToCommunications,
+            toggle: 'map-to-communications',
+        }) }}
+
+        <div id="map-to-communications" class="{{ not mapToCommunications ? 'hidden' }}">
+            <div class="field">
+                <button class="btn" :class="{ 'fui-loading fui-loading-sm': loading }" data-icon="refresh" @click.prevent="refresh({ refreshCommunications: true })">{{ 'Refresh Subscription Types' | t('formie') }}</button>
+            </div>
+
+            {{ forms.selectField({
+                label: 'Legal Basis' | t('formie'),
+                instructions: 'Select the legal basis to record in {name} when a contact is subscribed.' | t('formie', { name: displayName }),
+                id: 'communicationsLegalBasis',
+                name: 'communicationsLegalBasis',
+                value: communicationsLegalBasis,
+                options: [
+                    { label: 'Freely given consent from contact' | t('formie'), value: 'CONSENT_WITH_NOTICE' },
+                    { label: 'Legitimate interest (prospect/lead)' | t('formie'), value: 'LEGITIMATE_INTEREST_PQL' },
+                    { label: 'Legitimate interest (existing customer)' | t('formie'), value: 'LEGITIMATE_INTEREST_CLIENT' },
+                    { label: 'Legitimate interest (other)' | t('formie'), value: 'LEGITIMATE_INTEREST_OTHER' },
+                    { label: 'Performance of a contract' | t('formie'), value: 'PERFORMANCE_OF_CONTRACT' },
+                    { label: 'Consent to process and store' | t('formie'), value: 'PROCESS_AND_STORE' },
+                    { label: 'Not applicable (non-GDPR)' | t('formie'), value: 'NON_GDPR' },
+                ],
+            }) }}
+
+            {{ forms.textField({
+                label: 'Legal Basis Explanation' | t('formie'),
+                instructions: 'Enter an explanation for the legal basis, stored with each subscription. You can use variables such as `{formName}`. Leave empty to use a default explanation.' | t('formie'),
+                id: 'communicationsLegalBasisExplanation',
+                name: 'communicationsLegalBasisExplanation',
+                value: communicationsLegalBasisExplanation,
+                placeholder: 'Consent given via the “{formName}” form.',
+            }) }}
+
+            <integration-field-mapping
+                label="{{ 'Communications Field Mapping' | t('formie') }}"
+                instructions="{{ 'Choose the field containing the email address, and for each {name} subscription type the field that records consent (for example an Agree field). Contacts are only ever subscribed, never unsubscribed.' | t('formie', { name: displayName }) }}"
+                name-label="{{ integration.displayName() }}"
+                id="communications-field-mapping"
+                name="communicationsFieldMapping"
+                :value="get(form, 'settings.integrations.{{ handle }}.communicationsFieldMapping')"
+                :rows="get(settings, 'communications')"
+            ></integration-field-mapping>
+
+            <ul v-if="!isEmpty(get(form, 'settings.integrations.{{ handle }}.errors.communicationsFieldMapping'))" class="errors" v-cloak>
+                <li v-for="(error, index) in get(form, 'settings.integrations.{{ handle }}.errors.communicationsFieldMapping')" :key="index">
                     ${ error }
                 </li>
             </ul>

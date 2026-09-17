@@ -8,6 +8,7 @@ use verbb\formie\events\ModifyFieldIntegrationValueEvent;
 use verbb\formie\helpers\ArrayHelper;
 use verbb\formie\helpers\Assets as AssetsHelper;
 use verbb\formie\helpers\StringHelper;
+use verbb\formie\helpers\Variables;
 use verbb\formie\models\IntegrationCollection;
 use verbb\formie\models\IntegrationField;
 use verbb\formie\models\IntegrationFormSettings;
@@ -32,6 +33,7 @@ class HubSpot extends Crm
 
     private const MARKETING_CONSENT_HANDLE = 'legalConsentOptionsMarketing';
     private const MARKETING_CONSENT_HANDLE_PREFIX = self::MARKETING_CONSENT_HANDLE . '__';
+    private const SUBSCRIPTION_HANDLE_PREFIX = 'subscription_';
 
     // Static Methods
     // =========================================================================
@@ -71,11 +73,15 @@ class HubSpot extends Crm
     public bool $mapToCompany = false;
     public bool $mapToTicket = false;
     public bool $mapToForm = false;
+    public bool $mapToCommunications = false;
     public ?array $contactFieldMapping = null;
     public ?array $dealFieldMapping = null;
     public ?array $companyFieldMapping = null;
     public ?array $ticketFieldMapping = null;
     public ?array $formFieldMapping = null;
+    public ?array $communicationsFieldMapping = null;
+    public ?string $communicationsLegalBasis = 'CONSENT_WITH_NOTICE';
+    public ?string $communicationsLegalBasisExplanation = null;
     public ?string $formId = null;
 
     private ?Client $_formsClient = null;
@@ -210,6 +216,9 @@ class HubSpot extends Crm
                 usort($settings['forms'], function($a, $b) {
                     return strcmp($a['name'], $b['name']);
                 });
+            } else if (Craft::$app->getRequest()->getParam('refreshCommunications')) {
+                // Just fetch the subscription types
+                $settings['communications'] = $this->_getCommunicationsFields();
             } else {
                 // Get Contacts fields
                 if ($this->mapToContact) {
@@ -344,6 +353,11 @@ class HubSpot extends Crm
                         ]),
                     ], $this->_getCustomFields($fields, ['dealname', 'pipeline', 'dealstage']));
                 }
+
+                // Get Communications (subscription types)
+                if ($this->mapToCommunications) {
+                    $settings['communications'] = $this->_getCommunicationsFields();
+                }
             }
         } catch (Throwable $e) {
             Integration::apiError($this, $e);
@@ -402,6 +416,45 @@ class HubSpot extends Crm
                     ]), true);
 
                     return false;
+                }
+            }
+
+            if ($this->mapToCommunications) {
+                $communicationsValues = $this->getFieldMappingValues($submission, $this->communicationsFieldMapping, 'communications');
+                $subscriberEmail = ArrayHelper::remove($communicationsValues, 'email');
+                $subscriptionHandles = $this->_getConsentedSubscriptionHandles($communicationsValues);
+
+                if ($subscriptionHandles) {
+                    if (!$subscriberEmail) {
+                        Integration::error($this, Craft::t('formie', 'Missing email address to update communication preferences for.'), true);
+
+                        return false;
+                    }
+
+                    $legalBasisExplanation = Variables::getParsedValue($this->communicationsLegalBasisExplanation, $submission, $submission->getForm());
+
+                    if (!$legalBasisExplanation) {
+                        $legalBasisExplanation = Craft::t('formie', 'Consent given via the “{name}” form.', [
+                            'name' => $submission->getForm()?->title,
+                        ]);
+                    }
+
+                    foreach ($subscriptionHandles as $handle) {
+                        $communicationsPayload = [
+                            'subscriptionId' => (int)str_replace(self::SUBSCRIPTION_HANDLE_PREFIX, '', $handle),
+                            'statusState' => 'SUBSCRIBED',
+                            'channel' => 'EMAIL',
+                            'legalBasis' => $this->communicationsLegalBasis ?: 'CONSENT_WITH_NOTICE',
+                            'legalBasisExplanation' => $legalBasisExplanation,
+                        ];
+
+                        $endpoint = 'communication-preferences/v4/statuses/' . rawurlencode($subscriberEmail);
+                        $response = $this->deliverPayload($submission, $endpoint, $communicationsPayload);
+
+                        if ($response === false) {
+                            return true;
+                        }
+                    }
                 }
             }
 
@@ -734,6 +787,7 @@ class HubSpot extends Crm
 
         $contact = $this->getFormSettingValue('contact');
         $deal = $this->getFormSettingValue('deal');
+        $communications = $this->getFormSettingValue('communications');
 
         // Validate the following when saving form settings
         $rules[] = [
@@ -745,6 +799,12 @@ class HubSpot extends Crm
         $rules[] = [
             ['dealFieldMapping'], 'validateFieldMapping', 'params' => $deal, 'when' => function($model) {
                 return $model->enabled && $model->mapToDeal;
+            }, 'on' => [Integration::SCENARIO_FORM],
+        ];
+
+        $rules[] = [
+            ['communicationsFieldMapping'], 'validateFieldMapping', 'params' => $communications, 'when' => function($model) {
+                return $model->enabled && $model->mapToCommunications;
             }, 'on' => [Integration::SCENARIO_FORM],
         ];
 
@@ -964,6 +1024,62 @@ class HubSpot extends Crm
         }
 
         return $communications;
+    }
+
+    private function _getCommunicationsFields(): array
+    {
+        $fields = [];
+
+        $response = $this->request('GET', 'communication-preferences/v4/definitions');
+        $definitions = $response['results'] ?? [];
+
+        foreach ($definitions as $definition) {
+            // Only allow active subscription types
+            if (!($definition['isActive'] ?? true)) {
+                continue;
+            }
+
+            $fields[] = new IntegrationField([
+                'handle' => self::SUBSCRIPTION_HANDLE_PREFIX . $definition['id'],
+                'name' => (string)($definition['name'] ?? $definition['id']),
+                'type' => IntegrationField::TYPE_BOOLEAN,
+            ]);
+        }
+
+        // Sort subscription types by name
+        usort($fields, function($a, $b) {
+            return strcmp($a->name, $b->name);
+        });
+
+        return array_merge([
+            new IntegrationField([
+                'handle' => 'email',
+                'name' => Craft::t('formie', 'Email'),
+                'required' => true,
+            ]),
+        ], $fields);
+    }
+
+    private function _getConsentedSubscriptionHandles(array $communicationsValues): array
+    {
+        $handles = [];
+
+        foreach ($communicationsValues as $handle => $value) {
+            $handle = (string)$handle;
+
+            if (!str_starts_with($handle, self::SUBSCRIPTION_HANDLE_PREFIX)) {
+                continue;
+            }
+
+            // Only ever subscribe when consent is given. Missing consent should never unsubscribe an existing subscriber.
+            if (!StringHelper::toBoolean((string)$value)) {
+                continue;
+            }
+
+            $handles[] = $handle;
+        }
+
+        return $handles;
     }
 
     private function _getFormFields($form): array

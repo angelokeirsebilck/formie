@@ -401,6 +401,7 @@ Follow the below steps to connect to the HubSpot API.
     - `tickets`
     - `forms`
     - `files`
+    - `communication_preferences.read_write` (only required for **Map to Communications**)
 1. Click **Update**, then click **Create app** in the top right.
 1. In the dialog box, review the info about your app's access token, then click **Continue creating**.
 1. Open the **Auth** tab for your private app.
@@ -423,6 +424,16 @@ Follow the below steps to connect to the HubSpot API.
 1. In the left-hand sidebar, select the name you gave the integration.
 1. Enable the integration and fill out all required fields.
 1. Click **Save** to save the form.
+
+### Communication Preferences
+Enable **Map to Communications** to subscribe contacts to your HubSpot subscription types (for example, a newsletter) through the <a href="https://developers.hubspot.com/docs/api-reference/communication-preferences-subscriptions-v4/guide" target="_blank">Communication Preferences API</a>. This records a proper opt-in with a legal basis in HubSpot, rather than storing consent in a contact property.
+
+1. Enable **Map to Communications** and click **Refresh Subscription Types** to fetch the subscription types from your HubSpot account.
+1. Select the **Legal Basis** to record for each subscription, and optionally a **Legal Basis Explanation**. The explanation supports variables such as `{formName}`.
+1. Map the **Email** to the field that contains the email address.
+1. Map each subscription type to the field that records consent, commonly an Agree field.
+
+A contact is only subscribed when the mapped consent field has a truthy value. Contacts are never unsubscribed by Formie, so a form submitted without consent leaves an existing subscription untouched.
 
 
 ## Infusionsoft
